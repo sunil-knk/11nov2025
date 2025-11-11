@@ -84,5 +84,6 @@ jobs:
               "body": "Automatically generated notes for features promoted to PROD.",
               "draft": false,
               "prerelease": false,
-              "generate_release_notes": true 
+              "generate_release_notes": true,
+              "previous_tag_name": "'"LAST_TAG"'"
             }'
