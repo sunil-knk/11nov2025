@@ -66,8 +66,8 @@ jobs:
           TAG_NAME=${{ steps.next_tag.outputs.next_tag }}
           TARGET_COMMITISH=${{ steps.sha.outputs.sha }}
           echo "Creating release for $TAG_NAME at $TARGET_COMMITISH"
-
-          API_URL="https://api.github.com/repos/${{ github.repository }}/releases"
+          API_URL="https://api.github.com/repos/${owner}/${REPO_NAME}/releases/generate-notes"
+          #API_URL="https://api.github.com/repos/${{ github.repository }}/releases"
           BODY=$(jq -n \
             --arg tag "$TAG_NAME" \
             --arg target "$TARGET_COMMITISH" \
