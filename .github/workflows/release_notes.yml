@@ -12,6 +12,8 @@ jobs:
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'Sprint Release:') &&
       github.event.pull_request.base.ref == 'test/PROD'
+    permissions:
+      contents: write  
     runs-on: ubuntu-latest
     env:
       TARGET_BRANCH: "test/PROD"
@@ -36,46 +38,51 @@ jobs:
           echo "Previous tag: $PREV_TAG"
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
 
-      - name: Determine next sprint tag
-        id: next_tag
+      - name: Determine Last Tag and Next Tag
+        id: tag_calc
         run: |
-          PREV=${{ steps.prev_tag.outputs.prev_tag }}
-          if [ -z "$PREV" ]; then
+          # 1. Find the last tag on the *current* branch history.
+          # We use 'git describe' to find the most recent tag reachable from the merge commit.
+          # The merge commit SHA is: ${{ github.event.pull_request.merge_commit_sha }}
+          
+          # Find the most recent tag matching 'sprint_*' reachable from the merge commit
+          LAST_TAG=$(git describe --tags --match 'sprint_*' --abbrev=0 ${{ github.event.pull_request.merge_commit_sha }} 2>/dev/null || echo "")
+          
+          if [ -z "$LAST_TAG" ]; then
             NEXT_TAG="sprint_1"
           else
-            NUM=$(echo $PREV | grep -oE '[0-9]+$' || echo "0")
+            # Extract number and increment
+            NUM=$(echo "$LAST_TAG" | grep -oE '[0-9]+$' || echo "0")
             NEXT_NUM=$((NUM + 1))
             NEXT_TAG="sprint_${NEXT_NUM}"
           fi
-          echo "Next tag: $NEXT_TAG"
-          echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
-
-      - name: Get latest commit SHA from test/PROD
-        id: sha
-        run: |
-          LATEST_SHA=$(git rev-parse origin/test/PROD)
-          echo "Latest commit on test/PROD: $LATEST_SHA"
-          echo "sha=$LATEST_SHA" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub release via REST API
-        env:
-          GITHUB_TOKEN: ${{ secrets.SUNIL3 }}
-        run: |
-          OWNER=$(echo "$REPO" | cut -d'/' -f1)
-          REPO_NAME=$(echo "$REPO" | cut -d'/' -f2)
-          TAG_NAME=${{ steps.next_tag.outputs.next_tag }}
-          TARGET_COMMITISH=${{ steps.sha.outputs.sha }}
-          echo "Creating release for $TAG_NAME at $TARGET_COMMITISH"
-          API_URL="https://api.github.com/repos/${owner}/${REPO_NAME}/releases/generate-notes"
-          #API_URL="https://api.github.com/repos/${{ github.repository }}/releases"
-          BODY=$(jq -n \
-            --arg tag "$TAG_NAME" \
-            --arg target "$TARGET_COMMITISH" \
-            '{tag_name: $tag, target_commitish: $target, generate_release_notes: true, name: $tag}')
           
-          curl -s -w "\n%{http_code}" -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+          echo "LAST_TAG=$LAST_TAG" >> $GITHUB_OUTPUT
+          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_OUTPUT
+          echo "Calculated next tag: $NEXT_TAG"
+
+      - name: Create GitHub release via REST API (Using generate_release_notes is true)
+        env:
+          GITHUB_TOKEN: ${{ secrets.SUNIL3 }} # Use default GITHUB_TOKEN
+        run: |
+          TAG_NAME=${{ steps.tag_calc.outputs.NEXT_TAG }}
+          # Target the exact merge commit SHA
+          TARGET_COMMITISH=${{ github.event.pull_request.merge_commit_sha }}
+          
+          echo "Creating release for $TAG_NAME at $TARGET_COMMITISH"
+          
+          # The API call uses generate_release_notes: true
+          curl -s -w "\n%{http_code}" -X POST "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -H "Authorization: Bearer ${{ env.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -H "Content-Type: application/json" \
-            -d "$BODY"
+            -d '{
+              "tag_name": "'"$TAG_NAME"'",
+              "target_commitish": "'"$TARGET_COMMITISH"'", 
+              "name": "Release: '"$TAG_NAME"'",
+              "body": "Automatically generated notes for features promoted to PROD.",
+              "draft": false,
+              "prerelease": false,
+              "generate_release_notes": true 
+            }'
