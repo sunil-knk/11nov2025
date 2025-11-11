@@ -10,7 +10,8 @@ jobs:
   create-release:
     if: >
       github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.title, 'Sprint Release:')
+      startsWith(github.event.pull_request.title, 'Sprint Release:') &&
+      github.event.pull_request.base.ref == 'test/PROD'
     runs-on: ubuntu-latest
     env:
       TARGET_BRANCH: "test/PROD"
