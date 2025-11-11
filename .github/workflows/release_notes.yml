@@ -1,89 +1,168 @@
-name: Production Release Tag (Native CLI/API)
+name: Auto Tag and Clean Release Notes (PROD)
 
 on:
   pull_request:
     types: [closed]
     branches:
-      - 'test/PROD'
+      - test/PROD
+
+permissions:
+  contents: write
 
 jobs:
-  create-prod-release:
+  create_release:
+    if: |
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.title, 'Sprint Release:')
     runs-on: ubuntu-latest
+
     env:
       TARGET_BRANCH: "test/PROD"
       GITHUB_API: "https://api.github.com"
       REPO: ${{ github.repository }}
-    
-    # Check if the PR was merged AND the title starts with "sprint release:" AND the target is 'test/prod'
-    if: |
-      github.event.pull_request.merged == true && 
-      startsWith(github.event.pull_request.pull_request.title, 'sprint release:') &&
-      github.event.pull_request.base.ref == 'test/PROD'
-      
-    # Required permissions to write tags and releases
-    permissions:
-      contents: write
-      pull-requests: read
-      
-    steps:
-      - name: Checkout repository history
-        # We need history to find existing tags, but must avoid 'uses: actions/checkout@v4'
-        run: |
-          git clone --single-branch --depth 1 https://x-access-token:${TOKEN}@github.com/${{ github.repository }} .
-          cd ${{ github.repository }}
-          git fetch origin --tags 
-          
-      - name: Calculate Next Sprint Tag
-        id: get_tag
-        working-directory: ${{ github.repository }}
-        run: |
-          # 1. Find the highest existing 'sprint_X' tag
-          LAST_TAG=$(git tag --list 'sprint_*' | sort -V | tail -n 1)
-          
-          if [ -z "$LAST_TAG" ]; then
-            NEW_TAG="sprint_1"
-          else
-            # 2. Extract number (gracefully handling missing tags)
-            NUM=$(echo "$LAST_TAG" | sed 's/sprint_//g')
-            if ! [[ "$NUM" =~ ^[0-9]+$ ]]; then
-              echo "Warning: Could not parse number from $LAST_TAG. Defaulting to sprint_1"
-              NEXT=1
-            else
-              NEXT=$((NUM + 1))
-            fi
-            NEW_TAG="sprint_${NEXT}"
-          fi
-          
-          # 3. Output the new tag name for subsequent steps
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
-          echo "Calculated new tag: $NEW_TAG"
 
-      - name: Create Release via GitHub API
+    steps:
+      # -------------------------------------------------------------------------
+      # 1. Clone repository (no 'uses:')
+      # -------------------------------------------------------------------------
+      - name: Clone repository
         env:
-          # Use the GITHUB_TOKEN provided by GitHub Actions
-          GH_TOKEN: ${{ secrets.SUNIL3 }}
-          NEW_TAG: ${{ env.NEW_TAG }}
-          # The commit SHA that the PR merged into 'test/prod'
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          REPO: ${{ github.repository }}
-          
+          TOKEN: ${{ secrets.SUNIL3 }}
         run: |
-          echo "Creating release with tag: $NEW_TAG"
+          echo "Cloning repository..."
+          git clone https://x-access-token:${TOKEN}@github.com/${{ github.repository }} .
+          git fetch --tags --prune
+          git checkout ${TARGET_BRANCH}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Repository cloned and configured."
+
+      # -------------------------------------------------------------------------
+      # 2. Determine next sprint tag
+      # -------------------------------------------------------------------------
+      - name: Compute next sprint tag
+        id: sprint
+        run: |
+          LAST=$(git tag --list "sprint_*" | sort -V | tail -n1)
+          if [ -z "$LAST" ]; then
+             NEXT="sprint_1"
+          else
+             NUM=$(echo "$LAST" | grep -oE '[0-9]+$')
+             NEXT="sprint_$((NUM+1))"
+          fi
+          echo "last_tag=$LAST" >> $GITHUB_OUTPUT
+          echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
+          echo "Last Tag: $LAST | Next Tag: $NEXT"
+
+      # -------------------------------------------------------------------------
+      # 3. Extract only PROD commits — exclude feature→release & feature→feature
+      # -------------------------------------------------------------------------
+      - name: Collect clean commit list for release notes
+        id: commits
+        run: |
+          LAST="${{ steps.sprint.outputs.last_tag }}"
+          echo "Collecting commits from $LAST to ${TARGET_BRANCH}..."
+
+          if [ -z "$LAST" ]; then
+            RANGE="${TARGET_BRANCH}"
+          else
+            RANGE="${LAST}..${TARGET_BRANCH}"
+          fi
+
+          echo "Collecting commits for release notes..."
+          RANGE=$(git describe --tags --abbrev=0)..HEAD
           
-          # Use curl command to hit the GitHub API
-          curl -L -X POST \
+          git log $RANGE --pretty=format:"%s" \
+            | grep -Ev -i \
+              -e "^merge pull request #[0-9]+.*from.*/test/feature-" \
+              -e "release/test\s*←\s*test/feature-" \
+              -e "test/feature-.*→.*release/test" \
+              -e "merge pull request #[0-9]+.*from.*/feature/" \
+            > commits.txt
+          
+          echo "Filtered commits (included in release):"
+          cat commits.txt
+
+
+
+
+            
+
+
+          echo "Filtered commits (included in release):"
+          cat commits.txt
+          echo "$commits.txt"
+          cat commits.txt || echo "No commits after filtering"
+          echo "============================================="
+
+      # -------------------------------------------------------------------------
+      # 4. Create and push tag
+      # -------------------------------------------------------------------------
+      - name: Create and push new tag
+        env:
+          TOKEN: ${{ secrets.SUNIL3 }}
+        run: |
+          TAG=${{ steps.sprint.outputs.new_tag }}
+          HEAD_SHA=$(git rev-parse ${TARGET_BRANCH})
+
+          git tag -a "$TAG" "$HEAD_SHA" -m "Sprint Release $TAG"
+          git push https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git "refs/tags/$TAG"
+
+          echo "✅ Tag $TAG created and pushed successfully."
+
+      # -------------------------------------------------------------------------
+      # 5. Create release using REST API
+      # -------------------------------------------------------------------------
+      - name: Create GitHub Release via API
+        env:
+          TOKEN: ${{ secrets.SUNIL3 }}
+          TAG: ${{ steps.sprint.outputs.new_tag }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+        run: |
+          OWNER=$(echo "$REPO" | cut -d'/' -f1)
+          REPO_NAME=$(echo "$REPO" | cut -d'/' -f2)
+          
+          echo "Preparing release payload..."
+          CUSTOM_BODY=$(cat commits.txt)
+          
+          
+
+          NOTES_RESPONSE=$(curl -s -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases" \
+            -H "Authorization: Bearer ${TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$REPO/releases" \
-            -d '{
-              "tag_name": "'"$NEW_TAG"'",
-              "target_commitish": "'"$MERGE_SHA"'", 
-              "name": "Release: '"$NEW_TAG"'",
-              "body": "Automatically generated release notes for features promoted to PROD.",
-              "draft": false,
-              "prerelease": false,
-              "generate_release_notes": true 
-            }'
+            -d "$(jq -n --arg tag "$TAG" --arg target "$TARGET_BRANCH" \
+                  '{tag_name:$tag, target_commitish:$target, generate_release_notes:true}')")
+          NOTES_BODY=$(echo "$NOTES_RESPONSE" | jq -r '.body')
+          # Step 2: Extract the merge pull request details (release/test -> PROD)
+          MERGE_SUMMARY=$(git log -1 --merges --pretty=format:"%s%n%b" \
+            | grep -E "Merge pull request.*from.*release/test" || true)
+      
+          # Step 3: If merge summary exists, safely inject after “What’s Changed”
+          if [[ "$NOTES_BODY" == *"What's Changed"* && -n "$MERGE_SUMMARY" ]]; then
+            # Escape backslashes, ampersands, and pipes for sed
+            ESCAPED_MERGE_SUMMARY=$(printf '%s\n' "$MERGE_SUMMARY" | sed -e 's/[\/&|]/\\&/g')
+            FINAL_BODY=$(echo "$NOTES_BODY" | sed "s|What's Changed|What's Changed\n${ESCAPED_MERGE_SUMMARY}\n|")
+          else
+            FINAL_BODY="$NOTES_BODY"
+          fi
+
+          #FULL_BODY=$(printf "%s\n\n%s" "$CUSTOM_BODY" "$FINAL_BODY")
+          FULL_BODY=$(printf "%s\n\n%s" "$NOTES_BODY" "$CUSTOM_BODY")
+
           
-          echo "Release creation initiated for tag $NEW_TAG on commit $MERGE_SHA."
+          PAYLOAD=$(jq -n \
+            --arg tag "$TAG" \
+            --arg target "$TARGET_BRANCH" \
+            --arg name "Sprint Release $TAG" \
+            --arg body "$FULL_BODY" \
+            '{ tag_name:$tag, target_commitish:$target, name:$name, body:$body, draft:false, prerelease:false,generate_release_notes:true }')
+          
+          echo "Creating release for $TAG..."
+          
+          CREATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
