@@ -130,7 +130,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -d "$(jq -n --arg tag "$TAG" --arg target "$TARGET_BRANCH" \
-                  '{tag_name:$tag, target_commitish:$target, generate_release_notes:true}')")
+                  '{tag_name:$tag, target_commitish:$target, generate_release_notes:false}')")
 
           #NOTES_RESPONSE=$(curl -s -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases" \
           #  -H "Authorization: Bearer ${TOKEN}" \
