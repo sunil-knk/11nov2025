@@ -125,7 +125,7 @@ jobs:
           echo "Preparing release payload..."
           CUSTOM_BODY=$(cat commits.txt)
           
-          NOTES_RESPONSE=$(curl -s -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases" \
+          NOTES_RESPONSE=$(curl -s -X POST "https://api.github.com/repos/${OWNER}/${REPO_NAME}/releases/generate-notes" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
