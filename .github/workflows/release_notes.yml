@@ -23,7 +23,7 @@ jobs:
 
     steps:
       # -------------------------------------------------------------------------
-      # 1. Determine latest tag using GitHub API
+      # 1. Determine latest sprint tag using GitHub REST API
       # -------------------------------------------------------------------------
       - name: Fetch latest tag from API
         id: tagfetch
@@ -56,45 +56,36 @@ jobs:
           echo "Last Tag: $LAST | Next Tag: $NEXT"
 
       # -------------------------------------------------------------------------
-      # 2. Collect only PROD merge commits
+      # 2. Collect only merged PRs from release/test → test/PROD
       # -------------------------------------------------------------------------
-      - name: Collect PROD commits
+      - name: Collect PROD commits for release body
         id: commits
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
           TARGET_BRANCH: test/PROD
         run: |
-          echo "Cloning repository..."
-          git clone https://x-access-token:${TOKEN}@github.com/${{ github.repository }} repo
-          cd repo
-      
           OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
           REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
-      
-          echo "Collecting commits for ${TARGET_BRANCH}..."
-          git fetch origin ${TARGET_BRANCH}
-          git checkout ${TARGET_BRANCH}
+
+          echo "Fetching merged pull requests from release/test → ${TARGET_BRANCH}..."
           
-          LAST="sprint_12"
-          RANGE_ARG=""
-          if [ -n "$LAST" ]; then
-            RANGE_ARG="${LAST}..HEAD"
-          fi
-      
-          # Capture merge commits and convert PR numbers to markdown links
-          git log $RANGE_ARG --pretty=format:"%s" \
-            | grep -E "Merge pull request #[0-9]+.*from.*/release/test" \
-            | sed -E "s/#([0-9]+)/[\#\1](https:\/\/github.com\/${OWNER}\/${REPO_NAME}\/pull\/\1)/g" \
-            > commits.txt || true
-      
+          curl -s -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API}/repos/${OWNER}/${REPO_NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
+            | jq -r '.[] | select(.merged_at != null) | select(.head.ref | test("release/test")) | "#\(.number) [\(.title)](\(.html_url)) merged by \(.user.login)"' \
+            > commits.txt
+
           if [ ! -s commits.txt ]; then
-            echo "No commits found for this release." > commits.txt
+            echo "No merged PRs found for ${TARGET_BRANCH}" > commits.txt
           fi
-      
-          echo "Release notes:"
+
+          echo "Release notes to include:"
           cat commits.txt
+
       # -------------------------------------------------------------------------
-      # 3. Create Release via API (auto creates tag)
+      # 3. Create GitHub Release (auto creates tag via REST API)
       # -------------------------------------------------------------------------
       - name: Create GitHub Release via API
         env:
@@ -105,7 +96,9 @@ jobs:
         run: |
           OWNER=$(echo "$REPO" | cut -d'/' -f1)
           REPO_NAME=$(echo "$REPO" | cut -d'/' -f2)
-          BODY=$(cat commits.txt | jq -Rs .)
+
+          echo "Preparing release body..."
+          BODY=$(jq -Rs . < commits.txt)
 
           echo "Creating release for tag: ${TAG}"
 
@@ -113,7 +106,7 @@ jobs:
             --arg tag "$TAG" \
             --arg target "$TARGET_BRANCH" \
             --arg name "Sprint Release $TAG" \
-            --arg body "$(cat commits.txt)" \
+            --argjson body "$BODY" \
             '{ tag_name:$tag, target_commitish:$target, name:$name, body:$body, draft:false, prerelease:false, generate_release_notes:false }')
 
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -126,12 +119,3 @@ jobs:
 
           echo "Release creation response:"
           echo "$RESPONSE"
-
-
-
-
-
-
-
-
-
