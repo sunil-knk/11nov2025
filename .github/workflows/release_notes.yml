@@ -60,25 +60,32 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Collect PROD commits
         id: commits
+        env:
+          TOKEN: ${{ secrets.SUNIL3 }}
+          TARGET_BRANCH: test/PROD
         run: |
-          echo "Collecting commits for test/PROD..."
+          echo "Cloning repository..."
+          git clone https://x-access-token:${TOKEN}@github.com/${{ github.repository }} repo
+          cd repo
+      
+          echo "Collecting commits for ${TARGET_BRANCH}..."
           git fetch origin ${TARGET_BRANCH}
           git checkout ${TARGET_BRANCH}
-
-          LAST="${{ steps.tagfetch.outputs.last_tag }}"
+          
+          LAST="sprint_12"
           RANGE_ARG=""
           if [ -n "$LAST" ]; then
             RANGE_ARG="${LAST}..HEAD"
           fi
-
+      
           git log $RANGE_ARG --pretty=format:"%s" \
             | grep -E "merge pull request #[0-9]+.*from.*/release/test" \
             > commits.txt || true
-
+      
           if [ ! -s commits.txt ]; then
             echo "No commits found for this release." > commits.txt
           fi
-
+      
           echo "Release notes:"
           cat commits.txt
 
