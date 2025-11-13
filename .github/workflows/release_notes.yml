@@ -68,6 +68,9 @@ jobs:
           git clone https://x-access-token:${TOKEN}@github.com/${{ github.repository }} repo
           cd repo
       
+          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+      
           echo "Collecting commits for ${TARGET_BRANCH}..."
           git fetch origin ${TARGET_BRANCH}
           git checkout ${TARGET_BRANCH}
@@ -78,8 +81,10 @@ jobs:
             RANGE_ARG="${LAST}..HEAD"
           fi
       
+          # Capture merge commits and convert PR numbers to markdown links
           git log $RANGE_ARG --pretty=format:"%s" \
-            | grep -E "merge pull request #[0-9]+.*from.*/release/test" \
+            | grep -E "Merge pull request #[0-9]+.*from.*/release/test" \
+            | sed -E "s/#([0-9]+)/[\#\1](https:\/\/github.com\/${OWNER}\/${REPO_NAME}\/pull\/\1)/g" \
             > commits.txt || true
       
           if [ ! -s commits.txt ]; then
@@ -88,7 +93,6 @@ jobs:
       
           echo "Release notes:"
           cat commits.txt
-
       # -------------------------------------------------------------------------
       # 3. Create Release via API (auto creates tag)
       # -------------------------------------------------------------------------
