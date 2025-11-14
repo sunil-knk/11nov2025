@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   create_release:
-    if: |
+    if: >
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'Sprint Release:')
     runs-on: ubuntu-latest
@@ -23,7 +23,7 @@ jobs:
 
     steps:
       # -------------------------------------------------------------
-      # 1. Get the latest sprint tag via GitHub REST API
+      # 1. Get latest sprint tag
       # -------------------------------------------------------------
       - name: Fetch latest sprint tag from API
         id: tagfetch
@@ -33,10 +33,9 @@ jobs:
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
-          echo "Fetching tags from GitHub API..."
           TAGS=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                "${API}/repos/${OWNER}/${NAME}/tags" | jq -r '.[].name')
+                "${API}/repos/${OWNER}/${NAME}/tags" \
+                | jq -r '.[].name')
 
           LAST=$(echo "$TAGS" | grep '^sprint_' | sort -V | tail -n1)
 
@@ -51,10 +50,10 @@ jobs:
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Filter ONLY merged PRs from release/* → test/PROD
-      #    using GitHub REST API
+      # 2. Filter PRs: only release/* → test/PROD
+      #    Exclude feature → release merges
       # -------------------------------------------------------------
-      - name: Collect only PROD PRs via REST API
+      - name: Collect filtered PRs via REST API
         id: prs
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
@@ -66,11 +65,12 @@ jobs:
 
           curl -s \
             -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
             "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
           | jq -r '
               .[]
               | select(.merged_at != null)
+              | select(.title | startswith("Sprint Release:"))
+              | select(.base.ref == "test/PROD")
               | select(.head.ref | startswith("release/"))
               | "- [#\(.number)](\(.html_url)) \(.title) by @\(.user.login)"
             ' > commits.txt
@@ -83,8 +83,7 @@ jobs:
           cat commits.txt
 
       # -------------------------------------------------------------
-      # 3. Create Release via REST API
-      #    generate_release_notes = true
+      # 3. Create Release with Markdown Notes
       # -------------------------------------------------------------
       - name: Create GitHub Release via REST API
         env:
@@ -96,20 +95,19 @@ jobs:
 
           BODY=$(jq -Rs . < commits.txt)
 
-          echo "Creating release for tag: ${TAG}"
-
           PAYLOAD=$(jq -n \
             --arg tag "$TAG" \
             --arg target "$TARGET_BRANCH" \
             --arg name "Sprint Release $TAG" \
             --arg body "$BODY" \
-            '{ tag_name:$tag,
-               target_commitish:$target,
-               name:$name,
-               body:$body,
-               draft:false,
-               prerelease:false,
-               generate_release_notes:true }')
+            '{
+              tag_name:$tag,
+              target_commitish:$target,
+              name:$name,
+              body:$body,
+              draft:false,
+              prerelease:false
+            }')
 
           curl -s -w "\n%{http_code}" -X POST \
             "${API}/repos/${OWNER}/${NAME}/releases" \
