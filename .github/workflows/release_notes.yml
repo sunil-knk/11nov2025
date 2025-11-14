@@ -39,6 +39,7 @@ jobs:
             "${API}/repos/${OWNER}/${NAME}/tags" | jq -r '.[].name')
 
           LAST=$(echo "$TAGS" | grep '^sprint_' | sort -V | tail -n1)
+
           if [ -z "$LAST" ]; then
             NEXT="sprint_1"
           else
@@ -49,7 +50,7 @@ jobs:
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Build custom release body ONLY for merges into test/PROD
+      # 2. Build custom release notes (bullet format)
       # -------------------------------------------------------------
       - name: Build filtered merge list
         id: releasenotes
@@ -58,23 +59,26 @@ jobs:
         run: |
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
-
           BASE="test/PROD"
 
           echo "### Changes Included in This Release" > body.md
+          echo "" >> body.md
 
           # Fetch merged PRs where base branch is test/PROD
           curl -s -H "Authorization: Bearer ${TOKEN}" \
-            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${BASE}" \
-            | jq -r '.[] | select(.merged_at != null) | "- #" + (.number|tostring) + " " + .title' \
-            >> body.md
+            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${BASE}&per_page=100" \
+          | jq -r '
+              .[] 
+              | select(.merged_at != null)
+              | "- \(.title) by @\(.user.login) in [#\(.number)](\(.html_url))"
+            ' >> body.md
 
           BODY=$(cat body.md)
           BODY_ESCAPED=$(printf "%s" "$BODY" | jq -Rs .)
           echo "body=$BODY_ESCAPED" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 3. Create Release (GitHub auto release notes + custom body)
+      # 3. Create Release (custom body only)
       # -------------------------------------------------------------
       - name: Create Release
         env:
