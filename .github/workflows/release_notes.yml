@@ -107,7 +107,7 @@ jobs:
             "draft": false,
             "prerelease": false,
             "generate_release_notes": true
-          }' "$TAG" "$TARGET_BRANCH" "$TAG" "$BODY")
+          }')
 
           echo "Creating release for tag: ${TAG}"
 
