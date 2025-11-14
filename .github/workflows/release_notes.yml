@@ -1,4 +1,4 @@
-name: Auto Tag and Custom Release Notes (PROD)
+name: Auto Tag and Release Notes (PROD)
 
 on:
   pull_request:
@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   create_release:
@@ -17,16 +18,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      TARGET_BRANCH: "test/PROD"
       REPO: ${{ github.repository }}
       API: "https://api.github.com"
 
     steps:
 
       # -------------------------------------------------------------
-      # 1. Compute next sprint tag
+      # 1. Compute next sprint_* tag
       # -------------------------------------------------------------
-      - name: Fetch latest sprint tag
+      - name: Compute Next Tag
         id: tagfetch
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
@@ -39,7 +39,6 @@ jobs:
             "${API}/repos/${OWNER}/${NAME}/tags" | jq -r '.[].name')
 
           LAST=$(echo "$TAGS" | grep '^sprint_' | sort -V | tail -n1)
-
           if [ -z "$LAST" ]; then
             NEXT="sprint_1"
           else
@@ -50,58 +49,52 @@ jobs:
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Collect only PRs merged into test/PROD using REST API
+      # 2. Build custom release body ONLY for merges into test/PROD
       # -------------------------------------------------------------
-      - name: Fetch filtered merged PRs
-        id: prs
+      - name: Build filtered merge list
+        id: releasenotes
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
         run: |
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
-          echo "Fetching PRs merged into ${TARGET_BRANCH}"
+          BASE="test/PROD"
 
-          curl -s \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
-          | jq -r '
-              .[]
-              | select(.merged_at != null)
-              | select(.base.ref == "test/PROD")        # ensure real PROD merges
-              | select(.head.ref | startswith("release/"))
-              | "- [#\(.number)](\(.html_url)) \(.title) by @\(.user.login)"
-            ' > release_body.txt
+          echo "### Changes Included in This Release" > body.md
 
-          if [ ! -s release_body.txt ]; then
-            echo "No production merges found" > release_body.txt
-          fi
+          # Fetch merged PRs where base branch is test/PROD
+          curl -s -H "Authorization: Bearer ${TOKEN}" \
+            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${BASE}" \
+            | jq -r '.[] | select(.merged_at != null) | "- #" + (.number|tostring) + " " + .title' \
+            >> body.md
 
-          echo "Release notes content:"
-          cat release_body.txt
+          BODY=$(cat body.md)
+          BODY_ESCAPED=$(printf "%s" "$BODY" | jq -Rs .)
+          echo "body=$BODY_ESCAPED" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 3. Create release with custom body (no auto notes)
+      # 3. Create Release (GitHub auto release notes + custom body)
       # -------------------------------------------------------------
-      - name: Create GitHub Release
+      - name: Create Release
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
           TAG: ${{ steps.tagfetch.outputs.new_tag }}
+          BODY: ${{ steps.releasenotes.outputs.body }}
         run: |
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
-
           TARGET="${{ github.event.pull_request.merge_commit_sha }}"
-          BODY=$(sed ':a;N;$!ba;s/\n/\\n/g' release_body.txt)
 
           cat <<EOF > payload.json
           {
             "tag_name": "${TAG}",
             "target_commitish": "${TARGET}",
             "name": "Sprint Release ${TAG}",
-            "body": "${BODY}",
             "draft": false,
-            "prerelease": false
+            "prerelease": false,
+            "generate_release_notes": true,
+            "body": ${BODY}
           }
           EOF
 
