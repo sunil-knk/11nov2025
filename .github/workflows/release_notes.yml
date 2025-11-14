@@ -1,4 +1,4 @@
-name: Auto Tag and Clean Release Notes (PROD)
+name: Auto Tag and Release Notes (PROD)
 
 on:
   pull_request:
@@ -17,16 +17,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      TARGET_BRANCH: "test/PROD"
       REPO: ${{ github.repository }}
       API: "https://api.github.com"
 
     steps:
 
       # -------------------------------------------------------------
-      # 1. Determine the latest sprint_* tag using GitHub REST API
+      # 1. Determine the next sprint_* tag
       # -------------------------------------------------------------
-      - name: Fetch latest sprint tag from API
+      - name: Fetch latest sprint tag
         id: tagfetch
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
@@ -36,7 +35,6 @@ jobs:
 
           TAGS=$(curl -s \
             -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
             "${API}/repos/${OWNER}/${NAME}/tags" | jq -r '.[].name')
 
           LAST=$(echo "$TAGS" | grep '^sprint_' | sort -V | tail -n1)
@@ -48,46 +46,12 @@ jobs:
             NEXT="sprint_$((NUM+1))"
           fi
 
-          echo "last_tag=$LAST" >> $GITHUB_OUTPUT
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Collect ONLY PROD-related merged PRs using GitHub REST API
-      #    Accept only head.ref starting with "release/"
+      # 2. Create the Release using auto-generated release notes
       # -------------------------------------------------------------
-      - name: Collect only PROD PRs via REST API
-        id: prs
-        env:
-          TOKEN: ${{ secrets.SUNIL3 }}
-        run: |
-          OWNER=$(echo "${REPO}" | cut -d'/' -f1)
-          NAME=$(echo "${REPO}" | cut -d'/' -f2)
-
-          echo "Fetching merged PRs into ${TARGET_BRANCH}"
-
-          curl -s \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
-          | jq -r '
-              .[]
-              | select(.merged_at != null)
-              | select(.head.ref | startswith("release/"))
-              | "- [#\(.number)](\(.html_url)) \(.title) by @\(.user.login)"
-            ' > commits.txt
-
-          if [ ! -s commits.txt ]; then
-            echo "No valid PRs for ${TARGET_BRANCH}" > commits.txt
-          fi
-
-          echo "Filtered PRs:"
-          cat commits.txt
-
-      # -------------------------------------------------------------
-      # 3. Create GitHub Release with correct Markdown formatting
-      #    generate_release_notes = true
-      # -------------------------------------------------------------
-      - name: Create GitHub Release via REST API
+      - name: Create GitHub Release
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
           TAG: ${{ steps.tagfetch.outputs.new_tag }}
@@ -95,24 +59,21 @@ jobs:
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
-          echo "Preparing clean markdown output"
-          BODY=$(cat commits.txt)
+          TARGET="${{ github.event.pull_request.merge_commit_sha }}"
 
-          # Build JSON manually to preserve newline formatting
-          PAYLOAD=$(printf '{
-            "tag_name": "%s",
-            "target_commitish": "%s",
-            "name": "Sprint Release %s",
-            "body": "%s",
+          cat <<EOF > payload.json
+          {
+            "tag_name": "${TAG}",
+            "target_commitish": "${TARGET}",
+            "name": "Sprint Release ${TAG}",
             "draft": false,
             "prerelease": false,
             "generate_release_notes": true
-          }')
-
-          echo "Creating release for tag: ${TAG}"
+          }
+          EOF
 
           curl -s -w "\n%{http_code}" -X POST \
             "${API}/repos/${OWNER}/${NAME}/releases" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            -d @payload.json
