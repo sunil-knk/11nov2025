@@ -1,4 +1,4 @@
-name: Auto Tag and Release Notes (PROD)
+name: Auto Tag and Custom Release Notes (PROD)
 
 on:
   pull_request:
@@ -17,13 +17,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      TARGET_BRANCH: "test/PROD"
       REPO: ${{ github.repository }}
       API: "https://api.github.com"
 
     steps:
 
       # -------------------------------------------------------------
-      # 1. Determine the next sprint_* tag
+      # 1. Compute next sprint tag
       # -------------------------------------------------------------
       - name: Fetch latest sprint tag
         id: tagfetch
@@ -49,7 +50,38 @@ jobs:
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Create the Release using auto-generated release notes
+      # 2. Collect only PRs merged into test/PROD using REST API
+      # -------------------------------------------------------------
+      - name: Fetch filtered merged PRs
+        id: prs
+        env:
+          TOKEN: ${{ secrets.SUNIL3 }}
+        run: |
+          OWNER=$(echo "${REPO}" | cut -d'/' -f1)
+          NAME=$(echo "${REPO}" | cut -d'/' -f2)
+
+          echo "Fetching PRs merged into ${TARGET_BRANCH}"
+
+          curl -s \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
+          | jq -r '
+              .[]
+              | select(.merged_at != null)
+              | select(.base.ref == "test/PROD")        # ensure real PROD merges
+              | select(.head.ref | startswith("release/"))
+              | "- [#\(.number)](\(.html_url)) \(.title) by @\(.user.login)"
+            ' > release_body.txt
+
+          if [ ! -s release_body.txt ]; then
+            echo "No production merges found" > release_body.txt
+          fi
+
+          echo "Release notes content:"
+          cat release_body.txt
+
+      # -------------------------------------------------------------
+      # 3. Create release with custom body (no auto notes)
       # -------------------------------------------------------------
       - name: Create GitHub Release
         env:
@@ -60,15 +92,16 @@ jobs:
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
           TARGET="${{ github.event.pull_request.merge_commit_sha }}"
+          BODY=$(sed ':a;N;$!ba;s/\n/\\n/g' release_body.txt)
 
           cat <<EOF > payload.json
           {
             "tag_name": "${TAG}",
             "target_commitish": "${TARGET}",
             "name": "Sprint Release ${TAG}",
+            "body": "${BODY}",
             "draft": false,
-            "prerelease": false,
-            "generate_release_notes": true
+            "prerelease": false
           }
           EOF
 
