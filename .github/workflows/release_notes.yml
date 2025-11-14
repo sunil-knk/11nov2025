@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   create_release:
-    if: >
+    if: |
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'Sprint Release:')
     runs-on: ubuntu-latest
@@ -22,8 +22,9 @@ jobs:
       API: "https://api.github.com"
 
     steps:
+
       # -------------------------------------------------------------
-      # 1. Get latest sprint tag
+      # 1. Determine the latest sprint_* tag using GitHub REST API
       # -------------------------------------------------------------
       - name: Fetch latest sprint tag from API
         id: tagfetch
@@ -33,9 +34,10 @@ jobs:
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
-          TAGS=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
-                "${API}/repos/${OWNER}/${NAME}/tags" \
-                | jq -r '.[].name')
+          TAGS=$(curl -s \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/repos/${OWNER}/${NAME}/tags" | jq -r '.[].name')
 
           LAST=$(echo "$TAGS" | grep '^sprint_' | sort -V | tail -n1)
 
@@ -50,10 +52,10 @@ jobs:
           echo "new_tag=$NEXT" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------------------
-      # 2. Filter PRs: only release/* → test/PROD
-      #    Exclude feature → release merges
+      # 2. Collect ONLY PROD-related merged PRs using GitHub REST API
+      #    Accept only head.ref starting with "release/"
       # -------------------------------------------------------------
-      - name: Collect filtered PRs via REST API
+      - name: Collect only PROD PRs via REST API
         id: prs
         env:
           TOKEN: ${{ secrets.SUNIL3 }}
@@ -65,12 +67,11 @@ jobs:
 
           curl -s \
             -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
             "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${TARGET_BRANCH}&per_page=100" \
           | jq -r '
               .[]
               | select(.merged_at != null)
-              | select(.title | startswith("Sprint Release:"))
-              | select(.base.ref == "test/PROD")
               | select(.head.ref | startswith("release/"))
               | "- [#\(.number)](\(.html_url)) \(.title) by @\(.user.login)"
             ' > commits.txt
@@ -83,7 +84,8 @@ jobs:
           cat commits.txt
 
       # -------------------------------------------------------------
-      # 3. Create Release with Markdown Notes
+      # 3. Create GitHub Release with correct Markdown formatting
+      #    generate_release_notes = true
       # -------------------------------------------------------------
       - name: Create GitHub Release via REST API
         env:
@@ -93,21 +95,21 @@ jobs:
           OWNER=$(echo "${REPO}" | cut -d'/' -f1)
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
 
-          BODY=$(jq -Rs . < commits.txt)
+          echo "Preparing clean markdown output"
+          BODY=$(cat commits.txt)
 
-          PAYLOAD=$(jq -n \
-            --arg tag "$TAG" \
-            --arg target "$TARGET_BRANCH" \
-            --arg name "Sprint Release $TAG" \
-            --arg body "$BODY" \
-            '{
-              tag_name:$tag,
-              target_commitish:$target,
-              name:$name,
-              body:$body,
-              draft:false,
-              prerelease:false
-            }')
+          # Build JSON manually to preserve newline formatting
+          PAYLOAD=$(printf '{
+            "tag_name": "%s",
+            "target_commitish": "%s",
+            "name": "Sprint Release %s",
+            "body": "%s",
+            "draft": false,
+            "prerelease": false,
+            "generate_release_notes": true
+          }' "$TAG" "$TARGET_BRANCH" "$TAG" "$BODY")
+
+          echo "Creating release for tag: ${TAG}"
 
           curl -s -w "\n%{http_code}" -X POST \
             "${API}/repos/${OWNER}/${NAME}/releases" \
