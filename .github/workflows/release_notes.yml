@@ -61,7 +61,7 @@ jobs:
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
           BASE="test/PROD"
 
-          echo "### Changes Included in This Release" > body.md
+          echo -e "### What's Changed\n<style>hr {border: 2px solid black;}</style>\n<hr>" > body.md
           echo "" >> body.md
 
           # Fetch merged PRs where base branch is test/PROD
