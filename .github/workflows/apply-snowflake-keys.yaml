@@ -1,6 +1,6 @@
 name: apply-snowflake-keys
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
         environment:
             description: 'Environment where the secrets will be applied'
