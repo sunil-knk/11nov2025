@@ -37,7 +37,7 @@ jobs:
       steps:
           - name: Query from KeePass
             id: query_keepass
-            uses: Sanofi-GitHub/Research_Foundation-Tool_Box_Automation/.github/actions/query-keys-KeePass@main
+            uses: .github/actions/query-keys-KeePass@main
             with:
               username: "${{ inputs.snowflake_user }}"
               KEEPASS_PASSWORD: "${{ secrets.KEEPASS_PASSWORD }}"
