@@ -37,7 +37,7 @@ jobs:
       steps:
           - name: Query from KeePass
             id: query_keepass
-            uses: .github/actions/query-keys-KeePass@main
+            uses: sunil-knk/11nov2025/.github/actions/query-keys-KeePass@main
             with:
               username: "${{ inputs.snowflake_user }}"
               KEEPASS_PASSWORD: "${{ secrets.KEEPASS_PASSWORD }}"
