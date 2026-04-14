@@ -1,6 +1,6 @@
 name: apply-snowflake-keys
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
         environment:
             description: 'Environment where the secrets will be applied'
@@ -37,7 +37,7 @@ jobs:
       steps:
           - name: Query from KeePass
             id: query_keepass
-            uses: Sanofi-GitHub/Research_Foundation-Tool_Box_Automation/.github/actions/query-keys-KeePass@main
+            uses: sunil-knk/11nov2025/.github/actions/query-keys-KeePass@main
             with:
               username: "${{ inputs.snowflake_user }}"
               KEEPASS_PASSWORD: "${{ secrets.KEEPASS_PASSWORD }}"
@@ -114,7 +114,7 @@ jobs:
       if: ${{ inputs.aws_path != '' }}
       needs: query-snowflake-keys
       name: Upload Snowflake Keys to AWS Secret Manager
-      uses: Sanofi-GitHub/Research_Foundation-Tool_Box_Automation/.github/workflows/upload-snowflake-keys-AWS-reusable.yaml@main
+      uses: .github/workflows/upload-snowflake-keys-AWS-reusable.yaml@main
       with:
         environment: "${{ github.event.inputs.environment }}"
         aws_region: "eu-west-1"

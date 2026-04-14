@@ -1,0 +1,74 @@
+name: upload-snowflake-keys-AWS-reusable
+
+on:
+  workflow_call:
+    inputs:
+        environment:
+            description: 'deployment environment'
+            type: string
+            required: true
+        masked_key:
+            description: 'Masked Snowflake key'
+            type: string
+            required: true
+        aws_region:
+            description: 'AWS region'
+            type: string
+            required: false
+            default: 'eu-west-1'
+        key_storage_path:
+            description: 'Key storage path in AWS Secrets Manager'
+            type: string
+            required: true
+
+jobs:
+  upload-snowflake-keys-AWS-reusable:
+    name: Upload Snowflake Keys to AWS Reusable
+    permissions:
+        id-token: write
+        contents: read
+    environment: ${{ inputs.environment }}
+    runs-on: ['atmos-aws-arc-runner-set']
+    container:
+      image: docker-innersource-remote.artifactorydev.p230559371484.aws-emea.sanofi.com/python:3.12
+      volumes:
+          - /var/run/secrets/eks.amazonaws.com/serviceaccount/token:/var/run/secrets/eks.amazonaws.com/serviceaccount/token
+    steps:
+
+      - name: Unmask key by passphrase-based decryption 
+        id: unmask-key
+        run: |
+          masked_key="${{ inputs.masked_key }}"
+
+          SNOWFLAKE_KEY=$(echo "$masked_key" | openssl enc -d -aes-256-cbc -a -pbkdf2 -salt -pass pass:"${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}")
+
+          echo "$SNOWFLAKE_KEY" | sed 's/^ */::add-mask::/'
+
+          { echo 'SNOWFLAKE_KEY<<EOF'
+            echo "$SNOWFLAKE_KEY"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"  
+
+      - name: Format Snowflake key
+        id: format-key
+        run: |
+          echo "${{ steps.unmask-key.outputs.SNOWFLAKE_KEY }}" > rsa_key.p8
+
+          formatted_key=$(< rsa_key.p8 awk 'NR == 1 {next} {if (last_line != "") print last_line; last_line = $0}' | tr -d '\n')
+
+          echo "$formatted_key" | sed 's/^ */::add-mask::/'
+          echo "key=$formatted_key" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS connections
+        uses:  Sanofi-GitHub/Research_Foundation-Tool_Box_Automation/.github/actions/configure-aws-connection@main
+        with:
+          IAM_ROLE: ${{ vars.IAM_ROLE }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+          aws_region: "${{ inputs.aws_region }}"
+
+      - name: Upload Snowflake key to AWS Secrets Manager
+        uses: Sanofi-GitHub/Research_Foundation-Tool_Box_Automation/.github/actions/upload-aws-secret@main 
+        with:
+          secret_id: "${{ inputs.key_storage_path }}"
+          secret_string: "${{ steps.format-key.outputs.key }}"
+          aws_region: "${{ inputs.aws_region }}"
