@@ -1,10 +1,24 @@
-name: Generate JKS (Simplified)
+name: Generate JKS
+run-name:${{ github.workflow }} to ${{ github.event.inputs.environment }} with JKS file name ${{ github.event.inputs.jks_file_name }}
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Environment to upload to'
+        required: true
+        default: 'dev01'
+        type: choice
+        options:
+          - dev01
+          - dev02
+          - test
+          - sit
+          - nft
+          - prod
+          
       jks_file_name:
-        description: "Name of the JKS file (already موجود in S3)"
+        description: 'Name of the JKS file to upload (e.g. dummy.cmdm.party.cdc.sub.msk.nprod.cba)", then expiry date will be appended: name.YYYY.MM.DD.jks)'
         required: true
       s3_bucket:
         description: "S3 bucket where JKS is stored"
@@ -12,10 +26,20 @@ on:
       s3_path:
         description: "S3 path to the JKS file"
         required: true
+      secret_name:
+        description: 'Name of the secret in AWS Secrets MAnager (if applicable)'
+        required: false
 
+    
+permissions:
+  actions: read
+  statuses: read
+  id-token: write
+  contents: write
+  
 jobs:
   process-jks:
-    runs-on: ubuntu-latest
+    runs-on: default
 
     steps:
       - name: Checkout repo
