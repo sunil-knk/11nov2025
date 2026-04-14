@@ -1,5 +1,5 @@
 name: Generate JKS
-run-name:${{ github.workflow }} to ${{ github.event.inputs.environment }} with JKS file name ${{ github.event.inputs.jks_file_name }}
+run-name: ${{ github.workflow }} to ${{ github.event.inputs.environment }} with JKS file name ${{ github.event.inputs.jks_file_name }}
 
 on:
   workflow_dispatch:
