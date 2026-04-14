@@ -61,12 +61,12 @@ jobs:
           NAME=$(echo "${REPO}" | cut -d'/' -f2)
           BASE="test/PROD"
 
-          echo -e "### What's Changed\n \n<hr>" > body.md
-          echo "" >> body.md
+          # echo -e "### What's Changed\n \n<hr>" > body.md
+          #echo "" >> body.md
 
           # Fetch merged PRs where base branch is test/PROD
           curl -s -H "Authorization: Bearer ${TOKEN}" \
-            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${BASE}&per_page=100" \
+            "${API}/repos/${OWNER}/${NAME}/pulls?state=closed&base=${BASE}...${LAST}" \
           | jq -r '
               .[] 
               | select(.merged_at != null)
@@ -97,7 +97,7 @@ jobs:
             "name": "Sprint Release ${TAG}",
             "draft": false,
             "prerelease": false,
-            "generate_release_notes": false,
+            "generate_release_notes": true,
             "body": ${BODY}
           }
           EOF
