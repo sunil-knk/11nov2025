@@ -38,12 +38,15 @@ permissions:
   contents: write
   
 jobs:
-  process-jks:
+  upload:
     runs-on: default
+    environment: ${{ inputs.environment }}
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+           fetch-depth: 0
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
