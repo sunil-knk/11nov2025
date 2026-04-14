@@ -40,7 +40,7 @@ permissions:
 jobs:
   upload:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    #environment: ${{ inputs.environment }}
 
     steps:
       - name: Checkout repo
