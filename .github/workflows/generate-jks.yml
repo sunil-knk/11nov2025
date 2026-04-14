@@ -1,0 +1,80 @@
+name: Generate JKS (Simplified)
+
+on:
+  workflow_dispatch:
+    inputs:
+      jks_file_name:
+        description: "Name of the JKS file (already موجود in S3)"
+        required: true
+      s3_bucket:
+        description: "S3 bucket where JKS is stored"
+        required: true
+      s3_path:
+        description: "S3 path to the JKS file"
+        required: true
+
+jobs:
+  process-jks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      # ✅ Step 1: Validate JKS exists in S3
+      - name: Validate JKS file exists in S3
+        run: |
+          aws s3 ls s3://${{ inputs.s3_bucket }}/${{ inputs.s3_path }}/${{ inputs.jks_file_name }} || {
+            echo "JKS file not found in S3"
+            exit 1
+          }
+
+      # ✅ Step 2: Download JKS
+      - name: Download JKS from S3
+        run: |
+          aws s3 cp s3://${{ inputs.s3_bucket }}/${{ inputs.s3_path }}/${{ inputs.jks_file_name }} ./input.jks
+
+      # ✅ Step 3: Import AWS CA Certificate
+      - name: Add AWS CA Certificate
+        run: |
+          keytool -importcert \
+            -trustcacerts \
+            -alias aws-ca \
+            -file aws-ca.crt \
+            -keystore input.jks \
+            -storepass ${{ secrets.JKS_PASSWORD }} \
+            -noprompt
+
+      # ✅ Step 4: Extract expiry date
+      - name: Extract JKS expiry date
+        id: expiry
+        run: |
+          EXPIRY=$(keytool -list -v -keystore input.jks -storepass ${{ secrets.JKS_PASSWORD }} \
+            | grep "Valid from" | head -1 | awk -F'until: ' '{print $2}' | awk '{print $1$2$3}')
+          
+          echo "expiry=$EXPIRY" >> $GITHUB_OUTPUT
+
+      # ✅ Step 5: Rename JKS with expiry
+      - name: Rename JKS with expiry
+        run: |
+          NEW_NAME="${{ inputs.jks_file_name }}_${{ steps.expiry.outputs.expiry }}.jks"
+          mv input.jks $NEW_NAME
+          echo "NEW_JKS_NAME=$NEW_NAME" >> $GITHUB_ENV
+
+      # ✅ Step 6: Upload updated JKS back to S3 (optional)
+      - name: Upload updated JKS to S3
+        run: |
+          aws s3 cp $NEW_JKS_NAME s3://${{ inputs.s3_bucket }}/${{ inputs.s3_path }}/$NEW_JKS_NAME
+
+      # ✅ Step 7: Create secret (existing logic placeholder)
+      - name: Create secret from JKS
+        run: |
+          echo "Creating secret from $NEW_JKS_NAME"
+          # Keep your existing secret creation logic here
